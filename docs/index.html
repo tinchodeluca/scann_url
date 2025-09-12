@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 Monitor de Precios Amazon</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>📊 Monitor de Precios Amazon</h1>
+        <p id="last-update">Cargando...</p>
+    </header>
+
+    <main>
+        <section class="summary">
+            <div class="card">
+                <h3>🛍️ Productos Monitoreados</h3>
+                <span id="total-products" class="metric">-</span>
+            </div>
+            <div class="card">
+                <h3>🎯 Alertas Activas</h3>
+                <span id="active-alerts" class="metric">-</span>
+            </div>
+            <div class="card">
+                <h3>💰 Ahorro Potencial</h3>
+                <span id="potential-savings" class="metric">€-</span>
+            </div>
+        </section>
+
+        <section class="products-grid" id="products-grid">
+            <!-- Los productos se cargan dinámicamente -->
+        </section>
+
+        <section class="charts">
+            <div class="chart-container">
+                <h3>📈 Evolución de Precios (Últimos 30 días)</h3>
+                <canvas id="price-chart"></canvas>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>🤖 Actualizado automáticamente cada 6 horas via GitHub Actions</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
