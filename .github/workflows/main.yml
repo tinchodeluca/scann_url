@@ -31,3 +31,11 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+    
+    - name: 💾 Guardar archivos del dashboard
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add docs/data/*.json || true
+        git commit -m "📊 Update dashboard data" || true
+        git push || true
