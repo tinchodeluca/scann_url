@@ -1,13 +1,13 @@
 {
-  "last_update": "2025-09-22T01:55:15.401816",
+  "last_update": "2025-09-22T02:04:39.025918",
   "products": [
     {
       "name": "WD 4TB",
       "url": "https://www.amazon.es/dp/B008JJLW4M",
-      "current_price": null,
+      "current_price": 147.16741791193283,
       "target_price": 100.0,
-      "alert": null,
-      "last_checked": "2025-09-22T01:55:24.950049"
+      "alert": false,
+      "last_checked": "2025-09-22T02:04:39.620297"
     }
   ],
   "alerts_count": 0,
