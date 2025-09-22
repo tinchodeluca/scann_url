@@ -9,482 +9,482 @@ from datetime import datetime
 import time
 import random
 import re
-from urllib.parse import quote
+from urllib.parse import urlparse
 
-class BulletproofAmazonMonitor:
+class AmazonPriceExtractor:
+    """Clase responsable únicamente de extraer precios de Amazon"""
+    
     def __init__(self):
         self.session = requests.Session()
-        
-        # Headers que simulan un navegador real
-        self.base_headers = {
+        self.setup_session()
+    
+    def setup_session(self):
+        """Configura la sesión con headers realistas"""
+        self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
             'DNT': '1',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
-        }
+            'Upgrade-Insecure-Requests': '1'
+        })
+    
+    def clean_url(self, url):
+        """Limpia la URL de Amazon para usar solo el ASIN"""
+        if '/dp/' in url:
+            asin = url.split('/dp/')[1].split('/')[0].split('?')[0]
+        elif '/gp/product/' in url:
+            asin = url.split('/gp/product/')[1].split('/')[0].split('?')[0]
+        else:
+            return url
         
-        self.email_user = os.environ.get('EMAIL_USER')
-        self.email_pass = os.environ.get('EMAIL_PASS')
-        self.recipient_email = os.environ.get('RECIPIENT_EMAIL')
+        domain = urlparse(url).netloc
+        return f"https://{domain}/dp/{asin}"
     
-    def load_products(self):
+    def get_page_content(self, url):
+        """Obtiene el contenido HTML de la página"""
+        clean_url = self.clean_url(url)
+        
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            print("❌ Archivo config.json no encontrado")
-            return {"products": []}
-    
-    def get_amazon_price_api_method(self, url):
-        """Método usando API de terceros para precios"""
-        try:
-            # Extraer ASIN de la URL
-            asin = None
-            if '/dp/' in url:
-                asin = url.split('/dp/')[1].split('/')[0].split('?')[0]
-            elif '/gp/product/' in url:
-                asin = url.split('/gp/product/')[1].split('/')[0].split('?')[0]
+            # Pausa aleatoria para parecer humano
+            time.sleep(random.uniform(1, 3))
             
-            if not asin:
+            response = self.session.get(clean_url, timeout=15)
+            
+            if response.status_code == 200:
+                return response.content
+            else:
+                print(f"   ⚠️ Status HTTP: {response.status_code}")
                 return None
-            
-            # Determinar dominio
-            domain = 'com'
-            if '.es' in url:
-                domain = 'es'
-            elif '.uk' in url:
-                domain = 'co.uk'
-            elif '.de' in url:
-                domain = 'de'
-            elif '.fr' in url:
-                domain = 'fr'
-            elif '.it' in url:
-                domain = 'it'
-            
-            print(f"   🔍 ASIN extraído: {asin} (dominio: {domain})")
-            
-            # Método 1: Usar servicio de API gratuito
-            api_url = f"https://api.rainforestapi.com/request?api_key=demo&type=product&asin={asin}&amazon_domain=amazon.{domain}"
-            
+                
+        except requests.RequestException as e:
+            print(f"   ❌ Error de conexión: {e}")
+            return None
+    
+    def extract_price(self, url):
+        """Método principal para extraer precio"""
+        content = self.get_page_content(url)
+        if not content:
+            return None
+        
+        soup = BeautifulSoup(content, 'html.parser')
+        
+        # Intentar diferentes métodos en orden de prioridad
+        extractors = [
+            self._extract_from_primary_selectors,
+            self._extract_from_secondary_selectors,
+            self._extract_from_json_data,
+            self._extract_from_meta_tags
+        ]
+        
+        for extractor in extractors:
+            price = extractor(soup)
+            if price and self._is_valid_price(price, soup):
+                return price
+        
+        return None
+    
+    def _extract_from_primary_selectors(self, soup):
+        """Extrae precio usando los selectores principales de Amazon"""
+        primary_selectors = [
+            '.a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen',
+            '.a-price.a-text-price .a-offscreen',
+            'span.a-price-whole',
+            '.a-price .a-offscreen'
+        ]
+        
+        for selector in primary_selectors:
+            element = soup.select_one(selector)
+            if element:
+                price = self._parse_price_text(element.get_text())
+                if price:
+                    print(f"   💰 Precio encontrado (selector primario): €{price}")
+                    return price
+        
+        return None
+    
+    def _extract_from_secondary_selectors(self, soup):
+        """Extrae precio usando selectores secundarios"""
+        secondary_selectors = [
+            '#price_inside_buybox',
+            '#priceblock_dealprice',
+            '#priceblock_ourprice',
+            '[data-a-price] .a-offscreen'
+        ]
+        
+        for selector in secondary_selectors:
+            element = soup.select_one(selector)
+            if element:
+                price = self._parse_price_text(element.get_text())
+                if price:
+                    print(f"   💰 Precio encontrado (selector secundario): €{price}")
+                    return price
+        
+        return None
+    
+    def _extract_from_json_data(self, soup):
+        """Extrae precio de datos JSON embebidos"""
+        scripts = soup.find_all('script', type='application/ld+json')
+        
+        for script in scripts:
             try:
-                response = requests.get(api_url, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'product' in data and 'buybox_winner' in data['product']:
-                        price_str = data['product']['buybox_winner'].get('price', {}).get('value')
-                        if price_str:
-                            return float(price_str)
-            except:
-                pass
-            
-            return None
-            
-        except Exception as e:
-            print(f"   ⚠️ Error en API: {e}")
-            return None
+                data = json.loads(script.string)
+                price = self._find_price_in_json(data)
+                if price:
+                    print(f"   💰 Precio encontrado (JSON): €{price}")
+                    return price
+            except (json.JSONDecodeError, AttributeError):
+                continue
+        
+        return None
     
-    def get_price_with_selenium_fallback(self, url):
-        """Método que simula Selenium pero sin instalarlo"""
-        try:
-            # Simular comportamiento de usuario real
-            self.session.headers.update(self.base_headers)
-            
-            # Hacer request inicial a Amazon
-            print(f"   🌐 Conectando a Amazon...")
-            response = self.session.get(url, timeout=15)
-            
-            if response.status_code == 503:
-                print("   🤖 Detectado como bot, intentando bypass...")
-                time.sleep(5)
-                # Cambiar User-Agent y reintentar
-                self.session.headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-                response = self.session.get(url, timeout=15)
-            
-            if response.status_code != 200:
-                print(f"   ❌ Status code: {response.status_code}")
-                return None
-            
-            print(f"   ✅ Página cargada ({len(response.content)} bytes)")
-            
-            # Buscar precios con múltiples estrategias
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Estrategia 1: Buscar en meta tags
-            price = self.extract_from_meta_tags(soup)
-            if price:
-                return price
-            
-            # Estrategia 2: Buscar en JSON-LD
-            price = self.extract_from_json_ld(soup)
-            if price:
-                return price
-            
-            # Estrategia 3: Buscar en texto visible
-            price = self.extract_from_visible_text(soup)
-            if price:
-                return price
-            
-            # Estrategia 4: Buscar en atributos data
-            price = self.extract_from_data_attributes(soup)
-            if price:
-                return price
-            
-            # Estrategia 5: Regex en todo el HTML
-            price = self.extract_with_regex(response.text)
-            if price:
-                return price
-            
-            return None
-            
-        except Exception as e:
-            print(f"   ❌ Error en scraping: {e}")
-            return None
-    
-    def extract_from_meta_tags(self, soup):
-        """Extraer precio de meta tags"""
+    def _extract_from_meta_tags(self, soup):
+        """Extrae precio de meta tags"""
         meta_selectors = [
             'meta[property="product:price:amount"]',
-            'meta[property="og:price:amount"]',
-            'meta[name="price"]',
-            'meta[itemprop="price"]'
+            'meta[name="price"]'
         ]
         
         for selector in meta_selectors:
             element = soup.select_one(selector)
             if element:
-                content = element.get('content', '')
-                price = self.parse_price(content)
+                price = self._parse_price_text(element.get('content', ''))
                 if price:
-                    print(f"   💰 Precio encontrado en meta: €{price}")
+                    print(f"   💰 Precio encontrado (meta): €{price}")
                     return price
+        
         return None
     
-    def extract_from_json_ld(self, soup):
-        """Extraer precio de JSON-LD estructurado"""
-        scripts = soup.find_all('script', type='application/ld+json')
-        for script in scripts:
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, dict):
-                    # Buscar precio en diferentes estructuras
-                    price = self.find_price_in_json(data)
-                    if price:
-                        print(f"   💰 Precio encontrado en JSON-LD: €{price}")
-                        return price
-            except:
-                continue
-        return None
-    
-    def find_price_in_json(self, data):
-        """Buscar precio recursivamente en JSON"""
+    def _find_price_in_json(self, data):
+        """Busca precio recursivamente en estructura JSON"""
         if isinstance(data, dict):
             for key, value in data.items():
-                if key.lower() in ['price', 'priceamount', 'value'] and isinstance(value, (int, float, str)):
-                    price = self.parse_price(str(value))
+                if key.lower() in ['price', 'priceamount']:
+                    price = self._parse_price_text(str(value))
                     if price:
                         return price
                 elif isinstance(value, (dict, list)):
-                    price = self.find_price_in_json(value)
+                    price = self._find_price_in_json(value)
                     if price:
                         return price
         elif isinstance(data, list):
             for item in data:
-                price = self.find_price_in_json(item)
+                price = self._find_price_in_json(item)
                 if price:
                     return price
-        return None
-    
-    def extract_from_visible_text(self, soup):
-        """Extraer precio del texto visible"""
-        # Buscar elementos con clases relacionadas con precios
-        price_classes = [
-            '[class*="price"]',
-            '[class*="cost"]',
-            '[class*="amount"]',
-            '[id*="price"]',
-            '[data-*="price"]'
-        ]
         
-        for selector in price_classes:
-            elements = soup.select(selector)
-            for element in elements:
-                text = element.get_text(strip=True)
-                price = self.parse_price(text)
-                if price and 1 <= price <= 50000:  # Rango razonable
-                    print(f"   💰 Precio encontrado en clase: €{price}")
-                    return price
         return None
     
-    def extract_from_data_attributes(self, soup):
-        """Extraer precio de atributos data-*"""
-        elements = soup.find_all(attrs={'data-a-price': True})
-        for element in elements:
-            price_data = element.get('data-a-price')
-            price = self.parse_price(price_data)
-            if price:
-                print(f"   💰 Precio encontrado en data-attribute: €{price}")
-                return price
-        return None
-    
-    def extract_with_regex(self, html):
-        """Extraer precio con expresiones regulares"""
-        patterns = [
-            r'price["\s:]+([0-9,.]+)',
-            r'EUR["\s:]+([0-9,.]+)',
-            r'€\s*([0-9,.]+)',
-            r'([0-9,.]+)\s*€',
-            r'"value":\s*"?([0-9,.]+)"?',
-            r'"price":\s*"?([0-9,.]+)"?'
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, html, re.IGNORECASE)
-            for match in matches:
-                price = self.parse_price(match)
-                if price and 1 <= price <= 50000:
-                    print(f"   💰 Precio encontrado con regex: €{price}")
-                    return price
-        return None
-    
-    def parse_price(self, text):
-        """Convertir texto a precio numérico"""
+    def _parse_price_text(self, text):
+        """Convierte texto a precio numérico"""
         if not text:
             return None
         
-        # Limpiar texto
-        cleaned = re.sub(r'[^\d,.]', '', str(text))
+        # Limpiar el texto
+        cleaned = re.sub(r'[^\d,.]', '', str(text).strip())
+        
         if not cleaned:
             return None
         
         try:
-            # Manejar diferentes formatos
+            # Manejar diferentes formatos de precio
             if ',' in cleaned and '.' in cleaned:
-                # Formato: 1.234,56 o 1,234.56
-                if cleaned.rindex(',') > cleaned.rindex('.'):
+                # Determinar si es formato europeo (1.234,56) o americano (1,234.56)
+                last_comma = cleaned.rfind(',')
+                last_dot = cleaned.rfind('.')
+                
+                if last_comma > last_dot:
                     # Formato europeo: 1.234,56
                     cleaned = cleaned.replace('.', '').replace(',', '.')
                 else:
                     # Formato americano: 1,234.56
                     cleaned = cleaned.replace(',', '')
             elif ',' in cleaned:
-                # Solo coma: podría ser decimal o separador de miles
-                if len(cleaned.split(',')[-1]) == 2:
-                    # Probable decimal: 123,45
+                # Solo coma: determinar si es decimal o separador de miles
+                parts = cleaned.split(',')
+                if len(parts) == 2 and len(parts[1]) == 2:
+                    # Probablemente decimal: 123,45
                     cleaned = cleaned.replace(',', '.')
                 else:
-                    # Probable separador de miles: 1,234
+                    # Probablemente separador de miles: 1,234
                     cleaned = cleaned.replace(',', '')
             
-            price = float(cleaned)
-            return price if 1 <= price <= 50000 else None
+            return float(cleaned)
+            
         except ValueError:
             return None
     
-    def get_price(self, url):
-        """Método principal para obtener precio"""
-        print(f"   🔗 URL: {url}")
+    def _is_valid_price(self, price, soup):
+        """Valida si el precio es razonable para el producto"""
+        if not (5 <= price <= 5000):
+            return False
         
-        # Método 1: API (más confiable pero limitado)
-        price = self.get_amazon_price_api_method(url)
-        if price:
-            return price
+        # Obtener título del producto para contexto
+        title_element = soup.select_one('#productTitle')
+        title = title_element.get_text().lower() if title_element else ""
         
-        # Método 2: Scraping avanzado
-        price = self.get_price_with_selenium_fallback(url)
-        if price:
-            return price
+        # Validaciones específicas según tipo de producto
+        if any(word in title for word in ['4tb', '4 tb', 'disco', 'hdd', 'drive']):
+            # Para discos duros 4TB, precio razonable entre 80-400 EUR
+            return 80 <= price <= 400
+        elif any(word in title for word in ['cable', 'adaptador', 'funda']):
+            # Para accesorios, precio bajo puede ser normal
+            return 5 <= price <= 100
         
-        # Método 3: Fallback con precio de prueba (solo para testing)
-        if 'B008JJLW4M' in url or 'B0BDXSK2K7' in url:
-            # Simular precio para testing
-            test_price = random.uniform(120, 180)
-            print(f"   🧪 Precio de prueba (para testing): €{test_price:.2f}")
-            return test_price
-        
-        return None
+        # Validación general: precio no puede ser demasiado bajo para electrónicos
+        return price >= 10
+
+
+class EmailNotifier:
+    """Clase responsable de enviar notificaciones por email"""
     
-    def send_notification(self, alerts):
-        if not alerts or not all([self.email_user, self.email_pass, self.recipient_email]):
-            print("⚠️ Sin alertas o configuración de email incompleta")
-            return
+    def __init__(self, email_user, email_pass, recipient_email):
+        self.email_user = email_user
+        self.email_pass = email_pass
+        self.recipient_email = recipient_email
+    
+    def send_alert(self, alerts):
+        """Envía alerta por email cuando hay productos con precio objetivo alcanzado"""
+        if not alerts or not self._has_valid_credentials():
+            return False
         
         try:
-            msg = MIMEMultipart()
-            msg['From'] = self.email_user
-            msg['To'] = self.recipient_email
-            msg['Subject'] = f"🎉 ¡{len(alerts)} producto(s) con precio reducido!"
-            
-            body = "¡Hola! Los siguientes productos han alcanzado tu precio objetivo:\n\n"
-            
-            for alert in alerts:
-                body += f"🛍️ {alert['title']}\n"
-                body += f"   💰 Precio actual: €{alert['current_price']:.2f}\n"
-                body += f"   🎯 Precio objetivo: €{alert['target_price']:.2f}\n"
-                body += f"   💸 Ahorras: €{alert['target_price'] - alert['current_price']:.2f}\n"
-                body += f"   🔗 {alert['url']}\n\n"
-            
-            body += f"Dashboard: https://tinchodeluca.github.io/scann_url/\n"
-            body += f"Revisado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-            
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
-            
-            server = smtplib.SMTP('smtp.gmail.com', 587)
-            server.starttls()
-            server.login(self.email_user, self.email_pass)
-            server.send_message(msg)
-            server.quit()
-            
-            print("✅ Email enviado correctamente")
+            msg = self._create_message(alerts)
+            self._send_message(msg)
+            print(f"✅ Email enviado: {len(alerts)} alerta(s)")
+            return True
             
         except Exception as e:
-            print(f"❌ Error al enviar email: {e}")
+            print(f"❌ Error enviando email: {e}")
+            return False
     
-    def save_dashboard_data(self, products, alerts):
-        print("💾 Guardando datos para dashboard...")
+    def _has_valid_credentials(self):
+        """Verifica si las credenciales de email están configuradas"""
+        return all([self.email_user, self.email_pass, self.recipient_email])
+    
+    def _create_message(self, alerts):
+        """Crea el mensaje de email"""
+        msg = MIMEMultipart()
+        msg['From'] = self.email_user
+        msg['To'] = self.recipient_email
+        msg['Subject'] = f"🎉 {len(alerts)} producto(s) con precio objetivo alcanzado"
         
-        os.makedirs('docs/data', exist_ok=True)
+        body = self._create_body(alerts)
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
         
-        current_data = {
+        return msg
+    
+    def _create_body(self, alerts):
+        """Crea el cuerpo del email"""
+        body = "¡Hola! Los siguientes productos han alcanzado tu precio objetivo:\n\n"
+        
+        for alert in alerts:
+            savings = alert['target_price'] - alert['current_price']
+            body += f"🛍️ {alert['name']}\n"
+            body += f"   💰 Precio actual: €{alert['current_price']:.2f}\n"
+            body += f"   🎯 Precio objetivo: €{alert['target_price']:.2f}\n"
+            body += f"   💸 Ahorras: €{savings:.2f}\n"
+            body += f"   🔗 {alert['url']}\n\n"
+        
+        body += f"Revisado el: {datetime.now().strftime('%d/%m/%Y a las %H:%M')}\n"
+        body += "Dashboard: https://tinchodeluca.github.io/scann_url/"
+        
+        return body
+    
+    def _send_message(self, msg):
+        """Envía el mensaje por SMTP"""
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(self.email_user, self.email_pass)
+        server.send_message(msg)
+        server.quit()
+
+
+class DashboardDataManager:
+    """Clase responsable de manejar los datos del dashboard"""
+    
+    def __init__(self, data_dir='docs/data'):
+        self.data_dir = data_dir
+        self.current_prices_file = os.path.join(data_dir, 'current-prices.json')
+        self.history_file = os.path.join(data_dir, 'price-history.json')
+    
+    def save_data(self, products_data, alerts):
+        """Guarda los datos actuales y actualiza el historial"""
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+        current_data = self._prepare_current_data(products_data, alerts)
+        self._save_current_data(current_data)
+        self._update_history(current_data['products'])
+        
+        print("✅ Datos del dashboard actualizados")
+    
+    def _prepare_current_data(self, products_data, alerts):
+        """Prepara los datos actuales"""
+        total_savings = sum(
+            (item['target_price'] - item['current_price']) 
+            for item in products_data 
+            if item['current_price'] and item['current_price'] <= item['target_price']
+        )
+        
+        return {
             "last_update": datetime.now().isoformat(),
-            "products": [],
+            "products": products_data,
             "alerts_count": len(alerts),
-            "total_products": len(products)
+            "total_products": len(products_data),
+            "total_savings": round(total_savings, 2)
         }
-        
-        total_savings = 0
-        
-        for product in products:
-            current_price = self.get_price(product['url'])
-            is_alert = current_price and current_price <= product['target_price']
-            
-            if is_alert:
-                total_savings += (product['target_price'] - current_price)
-            
-            current_data["products"].append({
-                "name": product.get('name', 'Sin nombre'),
-                "url": product['url'],
-                "current_price": current_price,
-                "target_price": product['target_price'],
-                "alert": is_alert,
-                "last_checked": datetime.now().isoformat()
-            })
-        
-        current_data["total_savings"] = round(total_savings, 2)
-        
-        # Guardar datos actuales
-        with open('docs/data/current-prices.json', 'w', encoding='utf-8') as f:
-            json.dump(current_data, f, ensure_ascii=False, indent=2)
-        
-        # Historial
-        history_file = 'docs/data/price-history.json'
+    
+    def _save_current_data(self, data):
+        """Guarda los datos actuales"""
+        with open(self.current_prices_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    def _update_history(self, products_data):
+        """Actualiza el historial de precios"""
         try:
-            with open(history_file, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if content:
-                    history_data = json.loads(content)
-                else:
-                    history_data = {"history": {}}
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             history_data = {"history": {}}
         
         today = datetime.now().strftime('%Y-%m-%d')
-        for product_data in current_data["products"]:
-            if product_data["current_price"]:
-                product_name = product_data["name"]
-                if product_name not in history_data["history"]:
-                    history_data["history"][product_name] = []
-                
-                today_entry = {
-                    "date": today,
-                    "datetime": datetime.now().isoformat(),
-                    "price": product_data["current_price"]
-                }
-                
-                existing_today = next((entry for entry in history_data["history"][product_name] 
-                                     if entry["date"] == today), None)
-                
-                if existing_today:
-                    existing_today["price"] = product_data["current_price"]
-                    existing_today["datetime"] = datetime.now().isoformat()
-                else:
-                    history_data["history"][product_name].append(today_entry)
-                
-                history_data["history"][product_name] = history_data["history"][product_name][-30:]
         
-        with open(history_file, 'w', encoding='utf-8') as f:
+        for product in products_data:
+            if not product['current_price']:
+                continue
+            
+            name = product['name']
+            if name not in history_data["history"]:
+                history_data["history"][name] = []
+            
+            # Actualizar o agregar entrada de hoy
+            today_entry = {
+                "date": today,
+                "datetime": datetime.now().isoformat(),
+                "price": product['current_price']
+            }
+            
+            # Buscar si ya existe entrada para hoy
+            existing = next(
+                (entry for entry in history_data["history"][name] if entry["date"] == today), 
+                None
+            )
+            
+            if existing:
+                existing.update(today_entry)
+            else:
+                history_data["history"][name].append(today_entry)
+            
+            # Mantener solo últimos 30 días
+            history_data["history"][name] = history_data["history"][name][-30:]
+        
+        with open(self.history_file, 'w', encoding='utf-8') as f:
             json.dump(history_data, f, ensure_ascii=False, indent=2)
-        
-        print("✅ Dashboard actualizado")
+
+
+class AmazonPriceMonitor:
+    """Clase principal que coordina todo el proceso de monitoreo"""
+    
+    def __init__(self):
+        self.price_extractor = AmazonPriceExtractor()
+        self.email_notifier = EmailNotifier(
+            os.environ.get('EMAIL_USER'),
+            os.environ.get('EMAIL_PASS'),
+            os.environ.get('RECIPIENT_EMAIL')
+        )
+        self.dashboard_manager = DashboardDataManager()
     
     def run(self):
-        print("🚀 Iniciando monitor INFALIBLE...")
+        """Ejecuta el proceso completo de monitoreo"""
+        print("🔍 Iniciando monitor de precios Amazon")
         print(f"📅 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         print("=" * 60)
         
-        config = self.load_products()
-        products = config.get('products', [])
-        
+        # Cargar productos
+        products = self._load_products()
         if not products:
-            print("❌ No hay productos en config.json")
+            print("❌ No hay productos para monitorear")
             return
         
+        # Procesar cada producto
+        products_data = []
         alerts = []
         
         for i, product in enumerate(products, 1):
             print(f"\n[{i}/{len(products)}] 🛍️ {product.get('name', 'Sin nombre')}")
             
-            # Pausa entre productos
-            if i > 1:
-                delay = random.uniform(2, 5)
-                print(f"   ⏳ Pausa de {delay:.1f}s...")
-                time.sleep(delay)
+            result = self._process_product(product)
+            products_data.append(result)
             
-            current_price = self.get_price(product['url'])
-            target_price = product['target_price']
-            
-            if current_price:
-                print(f"   💰 Precio actual: €{current_price:.2f}")
-                print(f"   🎯 Precio objetivo: €{target_price:.2f}")
-                
-                if current_price <= target_price:
-                    print(f"   🎉 ¡PRECIO OBJETIVO ALCANZADO!")
-                    alerts.append({
-                        'title': product.get('name', 'Producto'),
-                        'current_price': current_price,
-                        'target_price': target_price,
-                        'url': product['url']
-                    })
-                else:
-                    diff = current_price - target_price
-                    print(f"   ⏳ Faltan €{diff:.2f} para alcanzar objetivo")
-            else:
-                print(f"   ❌ No se pudo obtener precio")
+            if result['alert']:
+                alerts.append(result)
         
+        # Guardar datos y enviar notificaciones
+        self._finish_monitoring(products_data, alerts)
+    
+    def _load_products(self):
+        """Carga la configuración de productos"""
+        try:
+            with open('config.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                return config.get('products', [])
+        except FileNotFoundError:
+            print("❌ Archivo config.json no encontrado")
+            return []
+    
+    def _process_product(self, product):
+        """Procesa un producto individual"""
+        name = product.get('name', 'Sin nombre')
+        url = product['url']
+        target_price = product['target_price']
+        
+        # Extraer precio
+        current_price = self.price_extractor.extract_price(url)
+        
+        # Determinar si hay alerta
+        is_alert = bool(current_price and current_price <= target_price)
+        
+        # Mostrar resultado
+        if current_price:
+            print(f"   💰 Precio actual: €{current_price:.2f}")
+            print(f"   🎯 Precio objetivo: €{target_price:.2f}")
+            
+            if is_alert:
+                savings = target_price - current_price
+                print(f"   🎉 ¡OBJETIVO ALCANZADO! Ahorras €{savings:.2f}")
+            else:
+                diff = current_price - target_price
+                print(f"   ⏳ Faltan €{diff:.2f} para el objetivo")
+        else:
+            print(f"   ❌ No se pudo obtener el precio")
+        
+        return {
+            'name': name,
+            'url': url,
+            'current_price': current_price,
+            'target_price': target_price,
+            'alert': is_alert,
+            'last_checked': datetime.now().isoformat()
+        }
+    
+    def _finish_monitoring(self, products_data, alerts):
+        """Finaliza el proceso de monitoreo"""
         print(f"\n{'='*60}")
         
-        # Guardar datos dashboard
-        self.save_dashboard_data(products, alerts)
+        # Guardar datos del dashboard
+        self.dashboard_manager.save_data(products_data, alerts)
         
-        # Enviar emails
+        # Enviar notificaciones
         if alerts:
             print(f"📧 Enviando notificación para {len(alerts)} producto(s)")
-            self.send_notification(alerts)
+            self.email_notifier.send_alert(alerts)
         else:
             print("😴 Ningún producto alcanzó el precio objetivo")
         
-        print("✅ Monitor completado exitosamente")
+        print("✅ Monitoreo completado")
+
 
 if __name__ == "__main__":
-    monitor = BulletproofAmazonMonitor()
+    monitor = AmazonPriceMonitor()
     monitor.run()
