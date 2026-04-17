@@ -1,5 +1,5 @@
 {
-  "last_update": "2026-04-17T02:06:23.380811",
+  "last_update": "2026-04-17T07:25:19.647623",
   "products": [
     {
       "name": "WD 4TB",
@@ -7,7 +7,7 @@
       "current_price": null,
       "target_price": 85.0,
       "alert": false,
-      "last_checked": "2026-04-17T02:06:23.380756"
+      "last_checked": "2026-04-17T07:25:19.647567"
     }
   ],
   "alerts_count": 0,
