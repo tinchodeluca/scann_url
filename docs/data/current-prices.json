@@ -1,13 +1,13 @@
 {
-  "last_update": "2026-10-06T22:11:31.977443",
+  "last_update": "2026-10-07T03:54:48.758479",
   "products": [
     {
       "name": "WD 4TB",
       "url": "https://www.amazon.com/dp/B0BDXSK2K7",
-      "current_price": 259.0,
+      "current_price": null,
       "target_price": 85.0,
       "alert": false,
-      "last_checked": "2026-10-06T22:11:31.977368"
+      "last_checked": "2026-10-07T03:54:48.758406"
     }
   ],
   "alerts_count": 0,
